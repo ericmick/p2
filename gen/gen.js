@@ -3,6 +3,14 @@ const phi = (1 + sqrt5) / 2;
 const oneOver2Phi = 1 / (2 * phi);
 const sqrtOf5PlusSqrt5Over8 = Math.sqrt((5 + sqrt5) / 8);
 
+function mod(dividend, divisor) {
+  if (dividend < 0) {
+    return (divisor + dividend % divisor) % divisor;
+  } else {
+    return dividend % divisor;
+  }
+}
+
 /*
  * vertices are listed clockwise
  * +y is down
@@ -44,7 +52,7 @@ const TILES = {kite, dart};
 
 const star = {
   name: "star",
-  tiles: [
+  tileVertices: [
     {
       name: "dart",
       vertexIndex: 2,
@@ -70,7 +78,7 @@ const star = {
 
 const ace = {
   name: "ace",
-  tiles: [
+  tileVertices: [
     {
       name: "dart",
       vertexIndex: 0,
@@ -88,7 +96,7 @@ const ace = {
 
 const sun = {
   name: "sun",
-  tiles: [
+  tileVertices: [
     {
       name: "kite",
       vertexIndex: 2,
@@ -114,7 +122,7 @@ const sun = {
 
 const king = {
   name: "king",
-  tiles: [
+  tileVertices: [
     {
       name: "dart",
       vertexIndex: 2,
@@ -140,7 +148,7 @@ const king = {
 
 const jack = {
   name: "jack",
-  tiles: [
+  tileVertices: [
     {
       name: "kite",
       vertexIndex: 0,
@@ -166,7 +174,7 @@ const jack = {
 
 const queen = {
   name: "queen",
-  tiles: [
+  tileVertices: [
     {
       name: "dart",
       vertexIndex: 2,
@@ -192,7 +200,7 @@ const queen = {
 
 const deuce = {
   name: "deuce",
-  tiles: [
+  tileVertices: [
     {
       name: "dart",
       vertexIndex: 1,
@@ -254,56 +262,90 @@ function generateFigure(vertex, figure) {
    * vertices [{tiles: [(3-5)], x: number, y: number}]
    */
   const edges = [];
-  const vertices = [];
+  const vertices = [vertex];
+  const tiles = [];
+  
+  const findEdge = function findEdge(v1, v2) {
+    for (const e of edges) {
+      if ((e[0] === v1 && e[1] === v2) || (e[0] === v2 && e[1] === v1)) {
+        return e;
+      }
+    }
+  };
   
   // TODO match existing tiles against figure
   
   // TODO orient to existing tiles
   let angle = 0;
+  let previousTile = null;
   
-  for (const t of figure.tiles) {
-    const tile = copyTile(TILES[t.name]);
-    const figureVertex = tile.vertices[t.vertexIndex];
+  for (const tileIndex in figure.tileVertices) {
+    const tv = figure.tileVertices[tileIndex];
+    const tile = copyTile(TILES[tv.name]);
+    console.log(figure.tileVertices);
+    vertex.tiles.push(tile);
+    const figureVertex = tile.vertices[tv.vertexIndex];
     let sumOfOuterAngles = 0;
-    for (let i = 1; i <= t.vertexIndex; i++) {
+    for (let i = 1; i <= tv.vertexIndex; i++) {
       sumOfOuterAngles += 180 - tile.vertices[i].a;
     }
     rotate(tile.vertices, figureVertex.x, figureVertex.y, angle - sumOfOuterAngles - tile.firstEdgeAngle);
     translate(tile.vertices, vertex.x - figureVertex.x, vertex.y - figureVertex.y);
-    const tileVertices = [];
     for (let i = 0; i < tile.vertices.length; i++) {
       // TODO join other existing vertices
-      const v = {
-        edges: [],
-        tiles: [tile],
-        x: tile.vertices[i].x,
-        y: tile.vertices[i].y,
-        a: tile.vertices[i].a,
-        c: tile.vertices[i].c,
-      };
-      vertices.push(v);
-      tileVertices.push(v);
+      if (i === mod(tv.vertexIndex + 1, tile.vertices.length) && tileIndex > 0) {
+        console.log('previous tile vertex');
+        // joining previous tiles' shared vertices
+        tile.vertices[i] = previousTile.vertices[mod(figure.tileVertices[tileIndex - 1].vertexIndex - 1, previousTile.vertices.length)];
+        tile.vertices[i].tiles.push(tile);
+      } else if (i === mod(tv.vertexIndex - 1, tile.vertices.length) && tileIndex == figure.tileVertices.length - 1) {
+        console.log('first/last vertex');
+        // joining last tiles' shared vertices with the first tile
+        tile.vertices[i] = vertex.tiles[0].vertices[mod(figure.tileVertices[0].vertexIndex + 1, vertex.tiles[0].vertices.length)];
+        tile.vertices[i].tiles.push(tile);
+      } else if (i === tv.vertexIndex) {
+        console.log('figure vertex');
+        tile.vertices[i] = vertex;
+        tile.vertices[i].c = tile.vertices[i].c;
+        tile.vertices[i].tiles.push(tile);
+      } else {
+        console.log('new vertex');
+        tile.vertices[i] = {
+          edges: [],
+          tiles: [tile],
+          x: tile.vertices[i].x,
+          y: tile.vertices[i].y,
+          c: tile.vertices[i].c,
+        };
+        vertices.push(tile.vertices[i]);
+      }
     }
-    for (let i = 0; i < tileVertices.length; i++) {
-      const j = (i + 1) % tileVertices.length;
-      const e = [
-        tileVertices[i],
-        tileVertices[j],
-      ];
-      edges.push(e);
-      tileVertices[i].edges.push(e);
+    for (let i = 0; i < tile.vertices.length; i++) {
+      const j = (i + 1) % tile.vertices.length;
+      let e = findEdge(tile.vertices[i], tile.vertices[j]);
+      if (!e) {
+        e = [
+          tile.vertices[i],
+          tile.vertices[j],
+        ];
+        edges.push(e);
+      }
+      tile.vertices[i].edges.push(e);
     }
     angle += figureVertex.a;
+    previousTile = tile;
   }
   
   return {
     edges,
+    tiles,
     vertices,
   };
 }
 
 function generate() {
   const vertex = {
+    edges: [],
     tiles: [],
     x: 0,
     y: 0,
@@ -336,7 +378,7 @@ function draw(edges, vertices) {
              x2="${e[1].x * scale + offset.x}"
              y2="${e[1].y * scale + offset.y}"
              stroke-width="2"
-             stroke="blue" />`;
+             stroke="#00AAFF" />`;
   }
   for (let i = vertices.length - 1; i >= 0; i--) {
     const v = vertices[i];
