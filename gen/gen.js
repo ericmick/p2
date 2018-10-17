@@ -15,10 +15,10 @@ function mod(dividend, divisor) {
  * vertices are listed clockwise
  * +y is down
  * +x is to the right
- * the "first edge" is between the first and second vertices
- * if the tile is rotated by `firstEdgeAngle` degrees, the inner angle of the first vertex will run clockwise from directly to the right
  * `a` is the inner angle in degrees
  * `c` is the "color" white: 1, black: 0
+ * the "first edge" is between the first and second vertices
+ * if the tile is rotated by `firstEdgeAngle` degrees, the inner angle of the first vertex will run clockwise from directly to the right
  */
 const dart = {
   name: 'dart',
@@ -222,7 +222,7 @@ const deuce = {
 
 const FIGURES = {star, ace, sun, king, jack, queen, deuce};
 
-function copyTile(tile) {
+function instanceTile(tile) {
   const vertices = [];
   for (const v of tile.vertices) {
     vertices.push({x: v.x, y: v.y, a: v.a, c: v.c});
@@ -231,10 +231,16 @@ function copyTile(tile) {
     firstEdgeAngle: tile.firstEdgeAngle,
     name: tile.name,
     vertices,
+    x: 0, // x translation,
+    y: 0, // y translation,
+    a: 0, // and angle, relative to the prototype
   };
 }
 
-function translate(vertices, x, y) {
+function translate(tile, x, y) {
+  const {vertices} = tile;
+  tile.x += x;
+  tile.y += y;
   for (const v of vertices) {
     v.x += x;
     v.y += y;
@@ -244,95 +250,191 @@ function translate(vertices, x, y) {
 /*
  * Rotates `vertices` around [`x`, `y`] clockwise by `a` degrees
  */
-function rotate(vertices, x, y, a) {
+function rotate(tile, x, y, a) {
+  const {vertices} = tile;
   const r = 2 * Math.PI * a / 360;
-  translate(vertices, -x, -y);
+  translate(tile, -x, -y);
   for (const v of vertices) {
     const vx = v.x * Math.cos(r) - v.y * Math.sin(r);
     const vy = v.x * Math.sin(r) + v.y * Math.cos(r);
     v.x = vx;
     v.y = vy;
   }
-  translate(vertices, x, y);
+  translate(tile, x, y);
+  tile.a = mod(tile.a + a, 360);
 }
 
-function generateFigure(vertex, figure) {
-  /*
-   * edges [{vertices: [{}(2)]}]
-   * vertices [{tiles: [(3-5)], x: number, y: number}]
-   */
-  const edges = [];
-  const vertices = [vertex];
-  const tiles = [];
+/* The value of an angle may be subject to increasing inaccuracy at large distances from the origin of the tessellation's construction, due to compounding imprecision.
+ * Therefore, the difference is required to be less than 1 degree, which should support very large tessellations, but not infinite.
+ */
+function closeEnough(a, b) {
+  const difference = mod(b - a, 360);
+  return difference < 1 || difference > 359;
+}
+
+function matchFigure(plane, vertex, figure, angle) {
+  for (const tile of vertex.tiles) {
+    let isMatch = false;
+    for (let tileIndex = 0; tileIndex < figure.tiles.length; tileIndex++) {
+      const figureTile = figure.tiles[tileIndex]
+      const expectedAngle = mod(figureTile.a + angle, 360);
+      isMatch = tile.name === figureTile.name
+        && closeEnough(expectedAngle, tile.a)
+        && tile.vertices[figure.tileVertices[tileIndex].vertexIndex] === vertex;
+      if (isMatch) break;
+    }
+    // Any detection of a unmatched tile means the figure/angle is not a match
+    if (!isMatch) return false;
+  }
+  // Failing to find any unmatch tiles means the vertex may turn out to be the given figure with the given angle
+  return true;
+}
+
+/*
+ * Returns [{figure, angle}]
+ * A zero-length array indicates degeneracy of the tessellation
+ */
+function identifyPossibleFigures(plane, vertex) {
+  const results = [];
   
-  const findEdge = function findEdge(v1, v2) {
-    for (const e of edges) {
-      if ((e[0] === v1 && e[1] === v2) || (e[0] === v2 && e[1] === v1)) {
-        return e;
+  // Iterate over figures
+  for (const figure of Object.values(FIGURES)) {
+    // Iterate over existing tiles (are they in any particular order?)
+    for (const tile of vertex.tiles) {
+      // Try to match the existing tile to a figure tile
+      for (const figureTile of figure.tiles) {
+        // Must be same type of tile
+        if (tile.name === figureTile.name) {
+          // How much do we rotate the figure to match the orientation of the existing tile?
+          const angle = mod(tile.a - figureTile.a, 360);
+          // Make sure this figure/angle isn't already confirmed
+          if (!results.find((result) => {
+            return result.figure.name === figure.name && closeEnough(result.angle, angle);
+          })) {
+            // Now, all existing tiles must each match a figure tile at this angle
+            if (matchFigure(plane, vertex, figure, angle)) {
+              results.push({figure, angle});
+            }
+          }
+        }
       }
     }
-  };
+  }
+  
+  return results;
+}
+
+findEdge = function findEdge(plane, v1, v2) {
+  for (const e of plane.edges) {
+    if ((e[0] === v1 && e[1] === v2) || (e[0] === v2 && e[1] === v1)) {
+      return e;
+    }
+  }
+};
+
+function generateFigure(plane, vertex, figure, angle = 0) {
+  /* plane: {
+   *   edges: [{vertices: [{}(2)]}]
+   *   tiles: [{vertices: [{}(4)]}]
+   *   vertices: [{tiles: [(1-5)], x: number, y: number}]
+   * }
+   */
+  const {edges, tiles, vertices} = plane;
   
   // TODO match existing tiles against figure
   
-  // TODO orient to existing tiles
-  let angle = 0;
   let previousTile = null;
   
   for (const tileIndex in figure.tileVertices) {
     const tv = figure.tileVertices[tileIndex];
-    const tile = copyTile(TILES[tv.name]);
-    console.log(figure.tileVertices);
-    vertex.tiles.push(tile);
-    const figureVertex = tile.vertices[tv.vertexIndex];
+    
+    // Determine tile position
     let sumOfOuterAngles = 0;
     for (let i = 1; i <= tv.vertexIndex; i++) {
-      sumOfOuterAngles += 180 - tile.vertices[i].a;
+      sumOfOuterAngles += 180 - TILES[tv.name].vertices[i].a;
     }
-    rotate(tile.vertices, figureVertex.x, figureVertex.y, angle - sumOfOuterAngles - tile.firstEdgeAngle);
-    translate(tile.vertices, vertex.x - figureVertex.x, vertex.y - figureVertex.y);
-    for (let i = 0; i < tile.vertices.length; i++) {
-      // TODO join other existing vertices
-      if (i === mod(tv.vertexIndex + 1, tile.vertices.length) && tileIndex > 0) {
-        console.log('previous tile vertex');
-        // joining previous tiles' shared vertices
-        tile.vertices[i] = previousTile.vertices[mod(figure.tileVertices[tileIndex - 1].vertexIndex - 1, previousTile.vertices.length)];
-        tile.vertices[i].tiles.push(tile);
-      } else if (i === mod(tv.vertexIndex - 1, tile.vertices.length) && tileIndex == figure.tileVertices.length - 1) {
-        console.log('first/last vertex');
-        // joining last tiles' shared vertices with the first tile
-        tile.vertices[i] = vertex.tiles[0].vertices[mod(figure.tileVertices[0].vertexIndex + 1, vertex.tiles[0].vertices.length)];
-        tile.vertices[i].tiles.push(tile);
-      } else if (i === tv.vertexIndex) {
-        console.log('figure vertex');
-        tile.vertices[i] = vertex;
-        tile.vertices[i].c = tile.vertices[i].c;
-        tile.vertices[i].tiles.push(tile);
-      } else {
-        console.log('new vertex');
-        tile.vertices[i] = {
-          edges: [],
-          tiles: [tile],
-          x: tile.vertices[i].x,
-          y: tile.vertices[i].y,
-          c: tile.vertices[i].c,
-        };
-        vertices.push(tile.vertices[i]);
+    const tileAngle = mod(angle - sumOfOuterAngles - TILES[tv.name].firstEdgeAngle, 360);
+    
+    let tile = null;
+    let figureVertex = null
+    
+    // Find existing tile
+    for (const vertexTile of vertex.tiles) {
+      if (vertexTile.name === tv.name
+          && closeEnough(vertexTile.a, tileAngle)
+          && vertexTile.vertices[tv.vertexIndex] === vertex) {
+        tile = vertexTile;
+        figureVertex = tile.vertices[tv.vertexIndex];
+        break;
       }
     }
-    for (let i = 0; i < tile.vertices.length; i++) {
-      const j = (i + 1) % tile.vertices.length;
-      let e = findEdge(tile.vertices[i], tile.vertices[j]);
-      if (!e) {
-        e = [
-          tile.vertices[i],
-          tile.vertices[j],
-        ];
-        edges.push(e);
+    
+    if (!tile) {
+      // New tile
+      tile = instanceTile(TILES[tv.name]);
+      vertex.tiles.push(tile);
+      tiles.push(tile);
+      
+      // Move tile into position
+      figureVertex = tile.vertices[tv.vertexIndex];
+      rotate(tile, figureVertex.x, figureVertex.y, tileAngle);
+      translate(tile, vertex.x - figureVertex.x, vertex.y - figureVertex.y);
+    
+      // Merge tile's vertices with existing vertices
+      for (let i = 0; i < tile.vertices.length; i++) {
+        /*if (i === mod(tv.vertexIndex + 1, tile.vertices.length) && tileIndex > 0) {
+          // Previous tiles' shared vertex
+          tile.vertices[i] = previousTile.vertices[mod(figure.tileVertices[tileIndex - 1].vertexIndex - 1, previousTile.vertices.length)];
+          tile.vertices[i].tiles.push(tile);
+        } else if (i === mod(tv.vertexIndex - 1, tile.vertices.length) && tileIndex == figure.tileVertices.length - 1) {
+          // Last tiles' vertex shared with the first tile
+          tile.vertices[i] = vertex.tiles[0].vertices[mod(figure.tileVertices[0].vertexIndex + 1, vertex.tiles[0].vertices.length)];
+          tile.vertices[i].tiles.push(tile);
+        } else if (i === tv.vertexIndex) {
+          // The figure vertex
+          const c = tile.vertices[i].c;
+          tile.vertices[i] = vertex;
+          tile.vertices[i].c = c;
+          tile.vertices[i].tiles.push(tile);
+        } else {*/
+          // join other existing vertices
+          const v = plane.vertices.find((v) => {
+            // No vertices should be closer to each other than 1
+            return Math.abs(v.x - tile.vertices[i].x) < 0.1
+              && Math.abs(v.y - tile.vertices[i].y) < 0.1;
+          });
+          if (v) {
+            tile.vertices[i] = v;
+            v.tiles.push(tile);
+          } else {
+            // New vertex
+            tile.vertices[i] = {
+              ...tile.vertices[i],
+              edges: [],
+              tiles: [tile],
+            };
+            vertices.push(tile.vertices[i]);
+          }
+        /*}*/
       }
-      tile.vertices[i].edges.push(e);
+      
+      // Add any new edges
+      for (let i = 0; i < tile.vertices.length; i++) {
+        const j = (i + 1) % tile.vertices.length;
+        let e = findEdge(plane, tile.vertices[i], tile.vertices[j]);
+        if (!e) {
+          e = [
+            tile.vertices[i],
+            tile.vertices[j],
+          ];
+          edges.push(e);
+          tile.vertices[i].edges.push(e);
+        }
+      }
     }
-    angle += figureVertex.a;
+    
+    // Continue clockwise
+    angle = mod(angle + TILES[tv.name].vertices[tv.vertexIndex].a, 360);
     previousTile = tile;
   }
   
@@ -343,16 +445,56 @@ function generateFigure(vertex, figure) {
   };
 }
 
+function generateFigures() {
+  for (const figure of Object.values(FIGURES)) {
+    const vertex = {
+      edges: [],
+      tiles: [],
+      x: 0,
+      y: 0,
+    };
+
+    let plane = {
+      edges: [],
+      tiles: [],
+      vertices: [vertex],
+    };
+    
+    const {edges, tiles, vertices} = generateFigure(plane, vertex, figure);
+    
+    Object.assign(figure, {edges, tiles, vertices});
+  }
+  console.log(FIGURES);
+}
+
+generateFigures();
+
 function generate() {
   const vertex = {
     edges: [],
     tiles: [],
     x: 0,
     y: 0,
+    c: 1,
+  };
+
+  let plane = {
+    edges: [],
+    tiles: [],
+    vertices: [vertex],
   };
   
-  const {edges, vertices} = generateFigure(vertex, king);
-  console.log({edges, vertices});
+  plane = generateFigure(plane, vertex, queen);
+  for (let i = 1; i < 43; i++) {
+    const possibleFigures = identifyPossibleFigures(plane, plane.vertices[i]);
+    console.log({possibleFigures});
+    if (possibleFigures.length < 1) {
+      break;
+    }
+    plane = generateFigure(plane, plane.vertices[i], possibleFigures[0].figure, possibleFigures[0].angle);
+  }
+  console.log(plane);
+  const {edges, vertices} = plane;
   return draw(edges, vertices);
 }
 
@@ -377,18 +519,18 @@ function draw(edges, vertices) {
              y1="${e[0].y * scale + offset.y}"
              x2="${e[1].x * scale + offset.x}"
              y2="${e[1].y * scale + offset.y}"
-             stroke-width="2"
-             stroke="#00AAFF" />`;
+             stroke-width="3"
+             stroke="#00AAFF66" />`;
   }
   for (let i = vertices.length - 1; i >= 0; i--) {
     const v = vertices[i];
     output += 
       `<circle cx = "${v.x * scale + offset.x}"
                cy = "${v.y * scale + offset.y}"
-               r = "3"
-               fill = "${v.c ? 'white' : 'black'}"
-               stroke-width="1"
-               stroke="black" />`;
+               r = "4"
+               fill = "${v.c ? '#FF000066' : '#00FF0066'}"
+               stroke-width="2"
+               stroke="#00000066" />`;
   }
   return output;
 }
