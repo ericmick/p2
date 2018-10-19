@@ -11,6 +11,31 @@ function mod(dividend, divisor) {
   }
 }
 
+/* 
+ * Handles cloning deep, plain objects and arrays with circular references
+ * We need this for cloning plains as vertices have a circular relationship with both edges and tiles [e<->v<->t] in a plane.
+ */
+function clone(input, map = new WeakMap()) {
+  const innerClone = (obj) => {
+    // Do not try to clone primitives or functions
+    if (Object(obj) !== obj || obj instanceof Function) {
+      return obj;
+    }
+    if (map.has(obj)) {
+      // Cyclic reference
+      return map.get(obj);
+    }
+    // Works for plain objects and arrays, but not other other types of javascript objects
+    var result = new obj.constructor();
+    map.set(obj, result);
+    for (let key in obj) {
+      result[key] = innerClone(obj[key], map);
+    }
+    return result;
+  };
+  return {result: innerClone(input), map};
+}
+
 /*
  * vertices are listed clockwise
  * +y is down
@@ -291,7 +316,8 @@ function matchFigure(plane, vertex, figure, angle) {
 }
 
 /*
- * Returns [{figure, angle}]
+ * Returns [{angle, figure}]
+ * Only checks how tiles fit at the given vertex
  * A zero-length array indicates degeneracy of the tessellation
  */
 function identifyPossibleFigures(plane, vertex) {
@@ -324,6 +350,41 @@ function identifyPossibleFigures(plane, vertex) {
   return results;
 }
 
+/*
+ * Returns [{angle, figure, plane}]
+ * Checks all vertices for degeneracy
+ * A zero-length array indicates degeneracy of the tessellation
+ */
+function tryFigures(plane, vertex, possibleFigures) {
+  possibleFigures = possibleFigures || identifyPossibleFigures(plane, vertex);
+  const successfulFigures = [];
+  let lastFailure = null;
+  for (let f of possibleFigures) {
+    let {result: p, map} = clone(plane);
+    generateFigure(p, map.get(vertex), f.figure, f.angle);
+    if (!p.vertices.find((v) => identifyPossibleFigures(p, v).length < 1)) {
+      map.get(vertex).figure = f.figure;
+      // Generate figures at any vertices which are forced to be one particular figure/angle
+      let forcedVertex;
+      if (forcedVertex = p.vertices.find((v) => !v.figure && identifyPossibleFigures(p, v).length === 1)) {
+        // This is recursive and must succeed (not degenerate) in order for this figure to be accepted
+        const result = tryFigures(p, forcedVertex);
+        if (result.length === 1) {
+          // There should be exactly one result
+          p = result[0].plane;
+          successfulFigures.push(Object.assign(f, {plane: p}));
+        };
+      } else {
+        successfulFigures.push(Object.assign(f, {plane: p}));
+      }
+    } else {
+      lastFailure = {vertex: p.vertices.find((v) => identifyPossibleFigures(p, v).length < 1), plane: p};
+      console.log('degeneracy detected', lastFailure);
+    }
+  }
+  return successfulFigures;
+}
+
 findEdge = function findEdge(plane, v1, v2) {
   for (const e of plane.edges) {
     if ((e[0] === v1 && e[1] === v2) || (e[0] === v2 && e[1] === v1)) {
@@ -334,9 +395,9 @@ findEdge = function findEdge(plane, v1, v2) {
 
 function generateFigure(plane, vertex, figure, angle = 0) {
   /* plane: {
-   *   edges: [{vertices: [{}(2)]}]
-   *   tiles: [{vertices: [{}(4)]}]
-   *   vertices: [{tiles: [(1-5)], x: number, y: number}]
+   *   edges: [{vertices: [{}(2)]}],
+   *   tiles: [{vertices: [{}(4)], ...}],
+   *   vertices: [{edges: [(1-5)], tiles: [(1-5)], x: number, y: number, ...}]
    * }
    */
   const {edges, tiles, vertices} = plane;
@@ -382,21 +443,6 @@ function generateFigure(plane, vertex, figure, angle = 0) {
     
       // Merge tile's vertices with existing vertices
       for (let i = 0; i < tile.vertices.length; i++) {
-        /*if (i === mod(tv.vertexIndex + 1, tile.vertices.length) && tileIndex > 0) {
-          // Previous tiles' shared vertex
-          tile.vertices[i] = previousTile.vertices[mod(figure.tileVertices[tileIndex - 1].vertexIndex - 1, previousTile.vertices.length)];
-          tile.vertices[i].tiles.push(tile);
-        } else if (i === mod(tv.vertexIndex - 1, tile.vertices.length) && tileIndex == figure.tileVertices.length - 1) {
-          // Last tiles' vertex shared with the first tile
-          tile.vertices[i] = vertex.tiles[0].vertices[mod(figure.tileVertices[0].vertexIndex + 1, vertex.tiles[0].vertices.length)];
-          tile.vertices[i].tiles.push(tile);
-        } else if (i === tv.vertexIndex) {
-          // The figure vertex
-          const c = tile.vertices[i].c;
-          tile.vertices[i] = vertex;
-          tile.vertices[i].c = c;
-          tile.vertices[i].tiles.push(tile);
-        } else {*/
           // join other existing vertices
           const v = plane.vertices.find((v) => {
             // No vertices should be closer to each other than 1
@@ -470,7 +516,7 @@ function generateFigures() {
 generateFigures();
 
 function generate() {
-  const vertex = {
+  const startingVertex = {
     edges: [],
     tiles: [],
     x: 0,
@@ -481,17 +527,26 @@ function generate() {
   let plane = {
     edges: [],
     tiles: [],
-    vertices: [vertex],
+    vertices: [startingVertex],
   };
   
-  plane = generateFigure(plane, vertex, queen);
-  for (let i = 1; i < 43; i++) {
-    const possibleFigures = identifyPossibleFigures(plane, plane.vertices[i]);
-    console.log({possibleFigures});
-    if (possibleFigures.length < 1) {
-      break;
+  plane = generateFigure(plane, startingVertex, queen);
+  for (let i = 1; i < 150 && i < plane.vertices.length; i++) {
+    const vertex = plane.vertices[i];
+    // If the vertex is out of bounds, skip it
+    if (vertex.x * scale > width / 2 || vertex.x * scale < -width / 2 || vertex.y * scale > height / 2 || vertex.y * scale < -height / 2) {
+      continue;
     }
-    plane = generateFigure(plane, plane.vertices[i], possibleFigures[0].figure, possibleFigures[0].angle);
+    const possibleFigures = identifyPossibleFigures(plane, vertex);
+    const successfulFigures = tryFigures(plane, vertex, possibleFigures);
+    console.log({possibleFigures, successfulFigures, i, vertex, plane});
+    if (successfulFigures.length === 0) {
+      // Failed to find any figure 
+      console.log(`failed at vertex ${i}`);
+    } else {
+      // Just go with the first figure that works.
+      plane = successfulFigures[0].plane;
+    }
   }
   console.log(plane);
   const {edges, vertices} = plane;
@@ -499,6 +554,7 @@ function generate() {
 }
 
 const ppi = 72;
+const scale = 50; // pixels per dart-width
 const width = 8.5 /*inches*/ * ppi;
 const height = 11 /*inches*/ * ppi;
 const output = `
@@ -509,7 +565,6 @@ const output = `
 `;
 
 function draw(edges, vertices) {
-  const scale = 50;
   const offset = {x: width / 2, y: height / 2};
   let output = '';
   for (let i = edges.length - 1; i >= 0; i--) {
@@ -528,9 +583,11 @@ function draw(edges, vertices) {
       `<circle cx = "${v.x * scale + offset.x}"
                cy = "${v.y * scale + offset.y}"
                r = "4"
-               fill = "${v.c ? '#FF000066' : '#00FF0066'}"
+               fill = "${v.c ? '#FF666666' : '#00660066'}"
                stroke-width="2"
-               stroke="#00000066" />`;
+               stroke="#00000066">
+        <title>${i}</title>
+      </circle>`;
   }
   return output;
 }
