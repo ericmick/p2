@@ -73,7 +73,36 @@ const kite = {
   firstEdgeAngle: 108,
 };
 
-const TILES = {kite, dart};
+const leftDart = {
+  name: 'leftDart',
+  vertices: [{
+    x: 0, y: 0, a: 180, c: 1 // 0
+  }, {
+    x: -oneOver2Phi, y: -sqrtOf5PlusSqrt5Over8, a: 36, c: 0 // 1
+  }, {
+    x: 1, y: 0, a: 72, c: 1 // 2
+  }, {
+    x: ((sqrt5-1)/4)/phi, y: sqrtOf5PlusSqrt5Over8/phi, a: 72, c: 0 // 3
+  }],
+  firstEdgeAngle: 252,
+};
+
+const rightDart = {
+  name: 'rightDart',
+  vertices: [{
+    x: 0, y: 0, a: 180, c: 1 // 0
+  }, {
+    x: ((sqrt5-1)/4)/phi, y: -sqrtOf5PlusSqrt5Over8/phi, a: 72, c: 0 // 1
+  }, {
+    x: 1, y: 0, a: 72, c: 1 // 2
+  }, {
+    x: -oneOver2Phi, y: sqrtOf5PlusSqrt5Over8, a: 36, c: 0 // 3
+  }],
+  firstEdgeAngle: 288,
+};
+
+const TILES = {kite, dart, leftDart, rightDart};
+const TRUNCATED_TILES = {leftDart, rightDart};
 
 const star = {
   name: "star",
@@ -246,6 +275,66 @@ const deuce = {
 };
 
 const FIGURES = {star, ace, sun, king, jack, queen, deuce};
+
+const truncatedJack = {
+  name: "truncatedJack",
+  tileVertices: [
+    {
+      name: "kite",
+      vertexIndex: 0,
+    },
+    {
+      name: "rightDart",
+      vertexIndex: 3,
+    },
+    {
+      name: "kite",
+      vertexIndex: 2,
+    },
+    {
+      name: "kite",
+      vertexIndex: 2,
+    },
+    {
+      name: "leftDart",
+      vertexIndex: 1,
+    },
+  ],
+};
+
+const truncatedDeuce = {
+  name: 'truncatedDeuce',
+  tileVertices: [
+    {
+      name: "leftDart",
+      vertexIndex: 1,
+    },
+    {
+      name: "kite",
+      vertexIndex: 0,
+    },
+    {
+      name: "kite",
+      vertexIndex: 0,
+    },
+    {
+      name: "rightDart",
+      vertexIndex: 3,
+    },
+  ],
+};
+
+const TRUNCATED_FIGURES = {truncatedJack, truncatedDeuce};
+
+function getTokenFigure(figure) {
+  if (figure.name === 'jack') {
+    return truncatedJack;
+  } else if (figure.name === 'deuce') {
+    return truncatedDeuce;
+  } else {
+    return figure;
+  }
+}
 
 function instanceTile(tile) {
   const vertices = [];
@@ -489,14 +578,14 @@ function generateFigure(plane, vertex, figure, angle = 0) {
 }
 
 function generateFigures() {
-  for (const figure of Object.values(FIGURES)) {
+  for (const figure of Object.values(FIGURES).concat(Object.values(TRUNCATED_FIGURES))) {
     let plane = newPlane();
     
     const {edges, tiles, vertices} = generateFigure(plane, plane.vertices[0], figure);
     
     Object.assign(figure, {edges, tiles, vertices});
   }
-  console.log(FIGURES);
+  console.log({FIGURES, TRUNCATED_FIGURES});
 }
 
 generateFigures();
@@ -546,8 +635,8 @@ function generate(firstFigureName) {
 }
 
 const ppi = 72;
-const width = 12 /*inches*/ * ppi;
-const height = 12 /*inches*/ * ppi;
+const width = 11 /*inches*/ * ppi;
+const height = 11 /*inches*/ * ppi;
 const scale = 72; // pixels per dart-width
 const tokenScale = 1/4;
 
@@ -580,7 +669,7 @@ function drawToken({edges, vertices}, scale, center) {
   
   output += 'Z" fill="transparent" stroke="black" stroke-width="2" />';
   
-  /*
+  // Edges of the central vertex
   if (edges) {
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
@@ -598,11 +687,11 @@ function drawToken({edges, vertices}, scale, center) {
                    x2="${x2}"
                    y2="${y2}"
                    stroke-width="1"
-                   stroke="#0000FF00" />`;
+                   stroke="#0000FFFF" />`;
         }
       }
     }
-  }*/
+  }
   
   return output;
 }
@@ -644,7 +733,8 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
       if (isInBounds(v.x * scale + center.x, v.y * scale + center.y)) {
           if (v.figure) {
             let p = newPlane();
-            p = generateFigure(p, p.vertices[0], v.figure, v.a);
+            let tokenFigure = getTokenFigure(v.figure);
+            p = generateFigure(p, p.vertices[0], tokenFigure, v.a);
             output += drawToken(p, scale * tokenScale, {x: v.x * scale + center.x, y: v.y * scale + center.y});
           } else {
             const color = v.c ? '#FFFFFFFF' : '#000000FF';
