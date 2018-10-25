@@ -6,8 +6,37 @@
   <title>Rogue Planet</title>
 </head>
 <body>
-  <a id="download" target="_blank">download</a>
+  <a id="download" target="_self">download</a>
   <div id="preview"></div>
+  <script>
+    function preview(output) {
+      const $preview = document.getElementById('preview');
+      $preview.innerHTML = output;
+    }
+
+    function b64EncodeUnicode(str) {
+      return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+        return String.fromCharCode(parseInt(p1, 16))
+      }))
+    }
+
+    function makeDownload(output) {
+      const declaration = `<?xml version="1.0" encoding="UTF-8" ?>`;
+      let dataUri = `data:image/svg+xml;base64,${b64EncodeUnicode(declaration+output)}`;
+      const $download = document.getElementById('download');
+      $download.href = dataUri;
+    }
+    
+    var worker = new Worker('gen.js');
+    worker.onmessage = (e) => {
+      const svg = print(e.data.svg);
+      preview(svg);
+      if (e.data.done) {
+        makeDownload(svg);
+      }
+    };
+    worker.postMessage('sun');
+  </script>
   <script src="gen.js"></script>
 </body>
 </html>

@@ -289,12 +289,9 @@ function rotate(tile, x, y, a) {
   tile.a = mod(tile.a + a, 360);
 }
 
-/* The value of an angle may be subject to increasing inaccuracy at large distances from the origin of the tessellation's construction, due to compounding imprecision.
- * Therefore, the difference is required to be less than 1 degree, which should support very large tessellations, but not infinite.
- */
 function closeEnough(a, b) {
   const difference = mod(b - a, 360);
-  return difference < 1 || difference > 359;
+  return difference === 0;
 }
 
 function matchFigure(plane, vertex, figure, angle) {
@@ -363,7 +360,6 @@ function tryFigures(plane, vertex, possibleFigures) {
     let {result: p, map} = clone(plane);
     generateFigure(p, map.get(vertex), f.figure, f.angle);
     if (!p.vertices.find((v) => identifyPossibleFigures(p, v).length < 1)) {
-      map.get(vertex).figure = f.figure;
       // Generate figures at any vertices which are forced to be one particular figure/angle
       let forcedVertex;
       if (forcedVertex = p.vertices.find((v) => !v.figure && identifyPossibleFigures(p, v).length === 1)) {
@@ -402,7 +398,8 @@ function generateFigure(plane, vertex, figure, angle = 0) {
    */
   const {edges, tiles, vertices} = plane;
   
-  // TODO match existing tiles against figure
+  vertex.figure = figure;
+  vertex.a = angle;
   
   let previousTile = null;
   
@@ -493,20 +490,9 @@ function generateFigure(plane, vertex, figure, angle = 0) {
 
 function generateFigures() {
   for (const figure of Object.values(FIGURES)) {
-    const vertex = {
-      edges: [],
-      tiles: [],
-      x: 0,
-      y: 0,
-    };
-
-    let plane = {
-      edges: [],
-      tiles: [],
-      vertices: [vertex],
-    };
+    let plane = newPlane();
     
-    const {edges, tiles, vertices} = generateFigure(plane, vertex, figure);
+    const {edges, tiles, vertices} = generateFigure(plane, plane.vertices[0], figure);
     
     Object.assign(figure, {edges, tiles, vertices});
   }
@@ -515,7 +501,7 @@ function generateFigures() {
 
 generateFigures();
 
-function generate() {
+function newPlane() {
   const startingVertex = {
     edges: [],
     tiles: [],
@@ -530,8 +516,14 @@ function generate() {
     vertices: [startingVertex],
   };
   
-  plane = generateFigure(plane, startingVertex, queen);
-  for (let i = 1; i < 150 && i < plane.vertices.length; i++) {
+  return plane;
+};
+
+function generate(firstFigureName) {
+  let plane = newPlane();
+  
+  plane = generateFigure(plane, plane.vertices[0], FIGURES[firstFigureName]);
+  for (let i = 1; i < 1000 && i < plane.vertices.length; i++) {
     const vertex = plane.vertices[i];
     // If the vertex is out of bounds, skip it
     if (vertex.x * scale > width / 2 || vertex.x * scale < -width / 2 || vertex.y * scale > height / 2 || vertex.y * scale < -height / 2) {
@@ -546,61 +538,143 @@ function generate() {
     } else {
       // Just go with the first figure that works.
       plane = successfulFigures[0].plane;
+      postMessage({svg: print(drawPlane(plane, scale, {x: width / 2, y: height / 2})), done: false});
     }
   }
   console.log(plane);
-  const {edges, vertices} = plane;
-  return draw(edges, vertices);
+  return plane;
 }
 
 const ppi = 72;
-const scale = 50; // pixels per dart-width
-const width = 8.5 /*inches*/ * ppi;
-const height = 11 /*inches*/ * ppi;
-const output = `
- <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${width}" height="${height}">
-  <rect x="0" y="0" width="${width}" height="${height}" stroke-width="2" stroke="pink" fill="none" />
-  ${generate()}
- </svg>
-`;
+const width = 12 /*inches*/ * ppi;
+const height = 12 /*inches*/ * ppi;
+const scale = 72; // pixels per dart-width
+const tokenScale = 1/4;
 
-function draw(edges, vertices) {
-  const offset = {x: width / 2, y: height / 2};
+function isInBounds(x, y) {
+  return x >= 0 && x <= width && y >= 0 && y <= height;
+};
+
+function drawToken({edges, vertices}, scale, center) {
   let output = '';
-  for (let i = edges.length - 1; i >= 0; i--) {
-    const e = edges[i];
-    output += 
-      `<line x1="${e[0].x * scale + offset.x}"
-             y1="${e[0].y * scale + offset.y}"
-             x2="${e[1].x * scale + offset.x}"
-             y2="${e[1].y * scale + offset.y}"
-             stroke-width="3"
-             stroke="#00AAFF66" />`;
+  // We skip the central figure vertex in order to draw the perimeter edges only
+  let firstVertex = vertices[1];
+  let previousVertex = null;
+  let vertex = firstVertex;
+  
+  output += `<path d="M ${vertex.x * scale + center.x} ${vertex.y * scale + center.y} `;
+  
+  do {
+    let edge = vertex.edges.find((e) => {
+      return e[0] !== vertices[0] 
+             && e[1] !== vertices[0]
+             && e[0] !== previousVertex
+             && e[1] !== previousVertex
+    });
+    
+    previousVertex = vertex;
+    vertex = edge[0] === vertex ? edge[1] : edge[0];
+    
+    output += `L ${vertex.x * scale + center.x} ${vertex.y * scale + center.y} `;
+  } while (vertex !== firstVertex);
+  
+  output += 'Z" fill="transparent" stroke="black" stroke-width="2" />';
+  
+  /*
+  if (edges) {
+    for (let i = edges.length - 1; i >= 0; i--) {
+      const e = edges[i];
+      if (e[0] === vertices[0] || e[1] === vertices[0]) {
+        
+        let x1 = e[0].x * scale + center.x;
+        let y1 = e[0].y * scale + center.y;
+        let x2 = e[1].x * scale + center.x;
+        let y2 = e[1].y * scale + center.y;
+        
+        if (isInBounds(x1, y1) && isInBounds(x2, y2)) {
+          output += 
+            `<line x1="${x1}"
+                   y1="${y1}"
+                   x2="${x2}"
+                   y2="${y2}"
+                   stroke-width="1"
+                   stroke="#0000FF00" />`;
+        }
+      }
+    }
+  }*/
+  
+  return output;
+}
+
+function drawPlane({edges, vertices, tiles}, scale, center) {
+  let output = '';
+  if (edges) {
+    for (let i = edges.length - 1; i >= 0; i--) {
+      const e = edges[i];
+      
+      // We reduce the length of these lines to make room for figure-tokens at the vertices
+      let x1 = e[0].x * scale + center.x;
+      let y1 = e[0].y * scale + center.y;
+      let x2 = e[1].x * scale + center.x;
+      let y2 = e[1].y * scale + center.y;
+      
+      edgeCenter = {x: (x2 + x1) / 2, y: (y2 + y1) / 2};
+      
+      x1 = (x1 + edgeCenter.x) / 2;
+      y1 = (y1 + edgeCenter.y) / 2;
+      x2 = (x2 + edgeCenter.x) / 2;
+      y2 = (y2 + edgeCenter.y) / 2;
+      
+      if (isInBounds(x1, y1) && isInBounds(x2, y2)) {
+        output += 
+          `<line x1="${x1}"
+                 y1="${y1}"
+                 x2="${x2}"
+                 y2="${y2}"
+                 stroke-width="2"
+                 stroke="#000000FF" />`;
+      }
+    }
   }
-  for (let i = vertices.length - 1; i >= 0; i--) {
-    const v = vertices[i];
-    output += 
-      `<circle cx = "${v.x * scale + offset.x}"
-               cy = "${v.y * scale + offset.y}"
-               r = "4"
-               fill = "${v.c ? '#FF666666' : '#00660066'}"
-               stroke-width="2"
-               stroke="#00000066">
-        <title>${i}</title>
-      </circle>`;
+
+  if (vertices) {
+    for (let i = vertices.length - 1; i >= 0; i--) {
+      const v = vertices[i];
+      if (isInBounds(v.x * scale + center.x, v.y * scale + center.y)) {
+          if (v.figure) {
+            let p = newPlane();
+            p = generateFigure(p, p.vertices[0], v.figure, v.a);
+            output += drawToken(p, scale * tokenScale, {x: v.x * scale + center.x, y: v.y * scale + center.y});
+          } else {
+            const color = v.c ? '#FFFFFFFF' : '#000000FF';
+            output += 
+              `<circle cx = "${v.x * scale + center.x}"
+                       cy = "${v.y * scale + center.y}"
+                       r = "15"
+                       fill = "${color}"
+                       stroke-width="2"
+                       stroke="#00000066">
+                <title>${i}</title>
+              </circle>`;
+          }
+        }
+    }
   }
   return output;
 }
 
-function b64EncodeUnicode(str) {
-  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
-    return String.fromCharCode(parseInt(p1, 16))
-  }))
+function print(svgContent) {
+  const output = `
+   <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${width}" height="${height}">
+    <rect x="0" y="0" width="${width}" height="${height}" stroke-width="2" stroke="pink" fill="none" />
+    ${svgContent}
+   </svg>
+  `;
+  return output;
 }
 
-const $download = document.getElementById('download');
-const $preview = document.getElementById('preview');
-const declaration = `<?xml version="1.0" encoding="UTF-8" ?>`;
-let dataUri = `data:image/svg+xml;base64,${b64EncodeUnicode(declaration+output)}`;
-$download.href = dataUri;
-$preview.innerHTML = output;
+onmessage = (e) => {
+  const plane = generate(e.data);
+  postMessage({svg: print(drawPlane(plane, scale, {x: width / 2, y: height / 2})), done: true});
+};
