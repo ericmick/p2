@@ -76,13 +76,13 @@ const kite = {
 const leftDart = {
   name: 'leftDart',
   vertices: [{
-    x: 0, y: 0, a: 180, c: 1 // 0
+    x: 0, y: 0, a: 180, c: 1, t: true // 0
   }, {
     x: -oneOver2Phi, y: -sqrtOf5PlusSqrt5Over8, a: 36, c: 0 // 1
   }, {
     x: 1, y: 0, a: 72, c: 1 // 2
   }, {
-    x: ((sqrt5-1)/4)/phi, y: sqrtOf5PlusSqrt5Over8/phi, a: 72, c: 0 // 3
+    x: ((sqrt5-1)/4)/phi, y: sqrtOf5PlusSqrt5Over8/phi, a: 72, c: 0, t: true // 3
   }],
   firstEdgeAngle: 252,
 };
@@ -90,11 +90,11 @@ const leftDart = {
 const rightDart = {
   name: 'rightDart',
   vertices: [{
-    x: 0, y: 0, a: 180, c: 1 // 0
+    x: 0, y: 0, a: 180, c: 1, t: true // 0
   }, {
-    x: ((sqrt5-1)/4)/phi, y: -sqrtOf5PlusSqrt5Over8/phi, a: 72, c: 0 // 1
+    x: ((sqrt5-1)/4)/phi, y: -sqrtOf5PlusSqrt5Over8/phi, a: 72, c: 0, t: true // 1
   }, {
-    x: 1, y: 0, a: 72, c: 1 // 2
+    x: 1, y: 0, a: 72, c: 1, // 2
   }, {
     x: -oneOver2Phi, y: sqrtOf5PlusSqrt5Over8, a: 36, c: 0 // 3
   }],
@@ -339,7 +339,7 @@ function getTokenFigure(figure) {
 function instanceTile(tile) {
   const vertices = [];
   for (const v of tile.vertices) {
-    vertices.push({x: v.x, y: v.y, a: v.a, c: v.c});
+    vertices.push({x: v.x, y: v.y, a: v.a, c: v.c, t: v.t});
   }
   return {
     firstEdgeAngle: tile.firstEdgeAngle,
@@ -620,7 +620,6 @@ function generate(firstFigureName) {
     }
     const possibleFigures = identifyPossibleFigures(plane, vertex);
     const successfulFigures = tryFigures(plane, vertex, possibleFigures);
-    console.log({possibleFigures, successfulFigures, i, vertex, plane});
     if (successfulFigures.length === 0) {
       // Failed to find any figure 
       console.log(`failed at vertex ${i}`);
@@ -638,7 +637,7 @@ const ppi = 72;
 const width = 11 /*inches*/ * ppi;
 const height = 11 /*inches*/ * ppi;
 const scale = 72; // pixels per dart-width
-const tokenScale = 1/4;
+const tokenScale = 1/(2*phi);
 
 function isInBounds(x, y) {
   return x >= 0 && x <= width && y >= 0 && y <= height;
@@ -667,9 +666,10 @@ function drawToken({edges, vertices}, scale, center) {
     output += `L ${vertex.x * scale + center.x} ${vertex.y * scale + center.y} `;
   } while (vertex !== firstVertex);
   
-  output += 'Z" fill="transparent" stroke="black" stroke-width="2" />';
+  output += 'Z" fill="transparent" stroke="#000000FF" stroke-width="2" />';
   
   // Edges of the central vertex
+  
   if (edges) {
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
@@ -686,8 +686,8 @@ function drawToken({edges, vertices}, scale, center) {
                    y1="${y1}"
                    x2="${x2}"
                    y2="${y2}"
-                   stroke-width="1"
-                   stroke="#0000FFFF" />`;
+                   stroke-width="2"
+                   stroke="#000000FF" />`;
         }
       }
     }
@@ -710,10 +710,10 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
       
       edgeCenter = {x: (x2 + x1) / 2, y: (y2 + y1) / 2};
       
-      x1 = (x1 + edgeCenter.x) / 2;
-      y1 = (y1 + edgeCenter.y) / 2;
-      x2 = (x2 + edgeCenter.x) / 2;
-      y2 = (y2 + edgeCenter.y) / 2;
+      x1 = x1 + (edgeCenter.x - x1) * tokenScale * 2;
+      y1 = y1 + (edgeCenter.y - y1) * tokenScale * 2;
+      x2 = x2 + (edgeCenter.x - x2) * tokenScale * 2;
+      y2 = y2 + (edgeCenter.y - y2) * tokenScale * 2;
       
       if (isInBounds(x1, y1) && isInBounds(x2, y2)) {
         output += 
