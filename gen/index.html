@@ -29,7 +29,7 @@
     
     var worker = new Worker('gen.js');
     worker.onmessage = (e) => {
-      const svg = print(e.data.svg);
+      const svg = e.data.svg;
       preview(svg);
       if (e.data.done) {
         makeDownload(svg);

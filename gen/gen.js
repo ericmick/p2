@@ -669,8 +669,9 @@ function drawToken({edges, vertices}, scale, center) {
   output += 'Z" fill="transparent" stroke="#000000FF" stroke-width="2" />';
   
   // Edges of the central vertex
-  
+  /*
   if (edges) {
+    output += '<path d="';
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
       if (e[0] === vertices[0] || e[1] === vertices[0]) {
@@ -681,24 +682,20 @@ function drawToken({edges, vertices}, scale, center) {
         let y2 = e[1].y * scale + center.y;
         
         if (isInBounds(x1, y1) && isInBounds(x2, y2)) {
-          output += 
-            `<line x1="${x1}"
-                   y1="${y1}"
-                   x2="${x2}"
-                   y2="${y2}"
-                   stroke-width="2"
-                   stroke="#000000FF" />`;
+          output += `M ${x1} ${y1} L ${x2} ${y2} `;
         }
       }
     }
+    output += '" stroke-width="2" stroke="#000000FF" />';
   }
-  
+  */
   return output;
 }
 
 function drawPlane({edges, vertices, tiles}, scale, center) {
   let output = '';
   if (edges) {
+    output += '<path d="';
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
       
@@ -716,15 +713,10 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
       y2 = y2 + (edgeCenter.y - y2) * tokenScale * 2;
       
       if (isInBounds(x1, y1) && isInBounds(x2, y2)) {
-        output += 
-          `<line x1="${x1}"
-                 y1="${y1}"
-                 x2="${x2}"
-                 y2="${y2}"
-                 stroke-width="2"
-                 stroke="#000000FF" />`;
+        output += `M ${x1} ${y1} L ${x2} ${y2} `;
       }
     }
+    output += '" stroke-width="2" stroke="#000000FF" />';
   }
 
   if (vertices) {
@@ -757,7 +749,6 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
 function print(svgContent) {
   const output = `
    <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${width}" height="${height}">
-    <rect x="0" y="0" width="${width}" height="${height}" stroke-width="2" stroke="pink" fill="none" />
     ${svgContent}
    </svg>
   `;
