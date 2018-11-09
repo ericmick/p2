@@ -612,7 +612,7 @@ function generate(firstFigureName) {
   let plane = newPlane();
   
   plane = generateFigure(plane, plane.vertices[0], FIGURES[firstFigureName]);
-  for (let i = 1; i < 1000 && i < plane.vertices.length; i++) {
+  for (let i = 1; i < vertexLimit && i < plane.vertices.length; i++) {
     const vertex = plane.vertices[i];
     // If the vertex is out of bounds, skip it
     if (vertex.x * scale > width / 2 || vertex.x * scale < -width / 2 || vertex.y * scale > height / 2 || vertex.y * scale < -height / 2) {
@@ -633,11 +633,13 @@ function generate(firstFigureName) {
   return plane;
 }
 
+// Settings
 const ppi = 72;
 const width = 11 /*inches*/ * ppi;
 const height = 11 /*inches*/ * ppi;
 const scale = 72; // pixels per dart-width
 const tokenScale = 1/(2*phi);
+const vertexLimit = 1000;
 
 function isInBounds(x, y) {
   return x >= 0 && x <= width && y >= 0 && y <= height;
@@ -743,6 +745,44 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
         }
     }
   }
+  
+  if (tiles) {
+    for (let i = tiles.length - 1; i >= 0; i--) {
+      output += '<path d="';
+      const t = tiles[i];
+      
+      // Find center (average of vertices)
+      const tileCenter = {x: 0, y: 0};
+      for (let j = t.vertices.length - 1; j >= 0; j--) {
+        tileCenter.x += t.vertices[j].x;
+        tileCenter.y += t.vertices[j].y;
+      }
+      tileCenter.x /= t.vertices.length;
+      tileCenter.y /= t.vertices.length;
+      
+      // Shrink towards center a bit (0.1) so that edges are clearly marked
+      for (let j = 0; j < t.vertices.length; j++) {
+        const v = t.vertices[j];
+        // Make vector towards center
+        let x = tileCenter.x - v.x;
+        let y = tileCenter.y - v.y;
+        // Normalize to (0.1)
+        let magnitude = Math.sqrt(x*x + y*y);
+        x /= (magnitude * 10);
+        y /= (magnitude * 10);
+        // Add vector to vertex
+        x += v.x;
+        y += v.y;
+        x *= scale;
+        y *= scale;
+        x += center.x;
+        y += center.y;
+        output += `${j === 0 ? 'M' : 'L'} ${x} ${y} `;
+      }
+      output += `Z" stroke-width="2" stroke="${t.name === 'kite' ? '#00FF00' : '#FF0000'}" fill="transparent"/>`;
+    }
+  }
+  
   return output;
 }
 
