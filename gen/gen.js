@@ -13,7 +13,7 @@ function mod(dividend, divisor) {
 
 /* 
  * Handles cloning deep, plain objects and arrays with circular references
- * We need this for cloning plains as vertices have a circular relationship with both edges and tiles [e<->v<->t] in a plane.
+ * We need this for cloning planes as vertices have a circular relationship with both edges and tiles [e<->v<->t] in a plane.
  */
 function clone(input, map = new WeakMap()) {
   const innerClone = (obj) => {
@@ -411,7 +411,11 @@ function identifyPossibleFigures(plane, vertex) {
   
   // Iterate over figures
   for (const figure of Object.values(FIGURES)) {
-    // Iterate over existing tiles (are they in any particular order?)
+    if (vertex.tiles.length === 0) {
+      // Naked vertex. Suggest each figure with angle 0, wolog
+      results.push({figure, angle: 0});
+    }
+    // Iterate over existing tiles (they are not in any particular order)
     for (const tile of vertex.tiles) {
       // Try to match the existing tile to a figure tile
       for (const figureTile of figure.tiles) {
@@ -608,11 +612,14 @@ function newPlane() {
   return plane;
 };
 
-function generate(firstFigureName) {
-  let plane = newPlane();
+function generate(firstFigureName, startPlane, alternativePlaneCallback) {
+  let plane = startPlane || newPlane();
   
-  plane = generateFigure(plane, plane.vertices[0], FIGURES[firstFigureName]);
-  for (let i = 1; i < vertexLimit && i < plane.vertices.length; i++) {
+  if (firstFigureName) {
+    plane = generateFigure(plane, plane.vertices[0], FIGURES[firstFigureName]);
+  }
+  
+  for (let i = plane.currentVertexIndex || 0; i < vertexLimit && i < plane.vertices.length; i++) {
     const vertex = plane.vertices[i];
     // If the vertex is out of bounds, skip it
     if (vertex.x * scale > width / 2 || vertex.x * scale < -width / 2 || vertex.y * scale > height / 2 || vertex.y * scale < -height / 2) {
@@ -621,16 +628,32 @@ function generate(firstFigureName) {
     const possibleFigures = identifyPossibleFigures(plane, vertex);
     const successfulFigures = tryFigures(plane, vertex, possibleFigures);
     if (successfulFigures.length === 0) {
-      // Failed to find any figure 
+      // Failed to find any figure
       console.log(`failed at vertex ${i}`);
     } else {
       // Just go with the first figure that works.
       plane = successfulFigures[0].plane;
       postMessage({svg: print(drawPlane(plane, scale, {x: width / 2, y: height / 2})), done: false});
+      // Call back to allow branching to other options
+      if (alternativePlaneCallback) {
+        for (let j = 1; j < successfulFigures.length; j++) {
+          console.log(successfulFigures[j].figure.name);
+          successfulFigures[j].plane.currentVertexIndex = i + 1;
+          alternativePlaneCallback(successfulFigures[j].plane);
+        }
+      }
     }
   }
+  
   console.log(plane);
   return plane;
+}
+
+function explore() {
+  const subGenerate = (plane) => {
+    return generate(null, plane, subGenerate);
+  };
+  return generate(null, null, subGenerate);
 }
 
 // Settings
@@ -639,7 +662,7 @@ const width = 11 /*inches*/ * ppi;
 const height = 11 /*inches*/ * ppi;
 const scale = 72; // pixels per dart-width
 const tokenScale = 1/(2*phi);
-const vertexLimit = 1000;
+const vertexLimit = 20;
 
 function isInBounds(x, y) {
   return x >= 0 && x <= width && y >= 0 && y <= height;
@@ -760,7 +783,7 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
       tileCenter.x /= t.vertices.length;
       tileCenter.y /= t.vertices.length;
       
-      // Shrink towards center a bit (0.1) so that edges are clearly marked
+      // Shrink towards center a bit (0.05) so that edges are clearly marked
       for (let j = 0; j < t.vertices.length; j++) {
         const v = t.vertices[j];
         // Make vector towards center
@@ -768,8 +791,8 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
         let y = tileCenter.y - v.y;
         // Normalize to (0.1)
         let magnitude = Math.sqrt(x*x + y*y);
-        x /= (magnitude * 10);
-        y /= (magnitude * 10);
+        x /= (magnitude * 20);
+        y /= (magnitude * 20);
         // Add vector to vertex
         x += v.x;
         y += v.y;
@@ -796,6 +819,6 @@ function print(svgContent) {
 }
 
 onmessage = (e) => {
-  const plane = generate(e.data);
+  const plane = explore();
   postMessage({svg: print(drawPlane(plane, scale, {x: width / 2, y: height / 2})), done: true});
 };
