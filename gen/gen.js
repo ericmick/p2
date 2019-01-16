@@ -631,8 +631,9 @@ function generate(firstFigureName, startPlane, alternativePlaneCallback) {
       // Failed to find any figure
       console.log(`failed at vertex ${i}`);
     } else {
-      // Just go with the first figure that works.
-      plane = successfulFigures[0].plane;
+      // Choose pseudo-randomly
+      const randomIndex = Math.floor(Math.random() * Math.floor(successfulFigures.length));
+      plane = successfulFigures[randomIndex].plane;
       postMessage({svg: print(drawPlane(plane, scale, {x: width / 2, y: height / 2})), done: false});
       // Call back to allow branching to other options
       if (alternativePlaneCallback) {
@@ -662,7 +663,7 @@ const width = 11 /*inches*/ * ppi;
 const height = 11 /*inches*/ * ppi;
 const scale = 72; // pixels per dart-width
 const tokenScale = 1/(2*phi);
-const vertexLimit = 20;
+const vertexLimit = 100;
 
 function isInBounds(x, y) {
   return x >= 0 && x <= width && y >= 0 && y <= height;
@@ -675,7 +676,7 @@ function drawToken({edges, vertices}, scale, center) {
   let previousVertex = null;
   let vertex = firstVertex;
   
-  output += `<path d="M ${vertex.x * scale + center.x} ${vertex.y * scale + center.y} `;
+  output += `M ${vertex.x * scale + center.x} ${vertex.y * scale + center.y} `;
   
   do {
     let edge = vertex.edges.find((e) => {
@@ -690,8 +691,6 @@ function drawToken({edges, vertices}, scale, center) {
     
     output += `L ${vertex.x * scale + center.x} ${vertex.y * scale + center.y} `;
   } while (vertex !== firstVertex);
-  
-  output += 'Z" fill="transparent" stroke="#000000FF" stroke-width="2" />';
   
   // Edges of the central vertex
   /*
@@ -720,7 +719,7 @@ function drawToken({edges, vertices}, scale, center) {
 function drawPlane({edges, vertices, tiles}, scale, center) {
   let output = '';
   if (edges) {
-    output += '<path d="';
+    output += '<path class="edges cut" d="';
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
       
@@ -745,35 +744,36 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
   }
 
   if (vertices) {
+    output += `<path class="figures cut" d="`;
     for (let i = vertices.length - 1; i >= 0; i--) {
       const v = vertices[i];
       if (isInBounds(v.x * scale + center.x, v.y * scale + center.y)) {
-          if (v.figure) {
-            let p = newPlane();
-            let tokenFigure = getTokenFigure(v.figure);
-            p = generateFigure(p, p.vertices[0], tokenFigure, v.a);
-            output += drawToken(p, scale * tokenScale, {x: v.x * scale + center.x, y: v.y * scale + center.y});
-          } else {
-            const color = v.c ? '#FFFFFFFF' : '#000000FF';
-            output += 
-              `<circle cx = "${v.x * scale + center.x}"
-                       cy = "${v.y * scale + center.y}"
-                       r = "15"
-                       fill = "${color}"
-                       stroke-width="2"
-                       stroke="#00000066">
-                <title>${i}</title>
-              </circle>`;
-          }
+        if (v.figure) {
+          let p = newPlane();
+          let tokenFigure = getTokenFigure(v.figure);
+          p = generateFigure(p, p.vertices[0], tokenFigure, v.a);
+          output += drawToken(p, scale * tokenScale, {x: v.x * scale + center.x, y: v.y * scale + center.y});
+        } else {
+          /*
+          const color = v.c ? '#FFFFFFFF' : '#000000FF';
+          output += 
+            `<circle cx = "${v.x * scale + center.x}"
+                     cy = "${v.y * scale + center.y}"
+                     r = "15"
+                     fill = "${color}"
+                     stroke-width="2"
+                     stroke="#00000066">
+              <title>${i}</title>
+            </circle>`;
+          */
         }
+      }
     }
+    output += '" fill="transparent" stroke="#000000FF" stroke-width="2" />';
   }
   
   if (tiles) {
-    for (let i = tiles.length - 1; i >= 0; i--) {
-      output += '<path d="';
-      const t = tiles[i];
-      
+    const printTile = (t) => {
       // Find center (average of vertices)
       const tileCenter = {x: 0, y: 0};
       for (let j = t.vertices.length - 1; j >= 0; j--) {
@@ -784,8 +784,8 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
       tileCenter.y /= t.vertices.length;
       
       // Shrink towards center a bit (0.05) so that edges are clearly marked
-      for (let j = 0; j < t.vertices.length; j++) {
-        const v = t.vertices[j];
+      for (let j = 0; j <= t.vertices.length; j++) {
+        const v = t.vertices[j % t.vertices.length];
         // Make vector towards center
         let x = tileCenter.x - v.x;
         let y = tileCenter.y - v.y;
@@ -802,8 +802,26 @@ function drawPlane({edges, vertices, tiles}, scale, center) {
         y += center.y;
         output += `${j === 0 ? 'M' : 'L'} ${x} ${y} `;
       }
-      output += `Z" stroke-width="2" stroke="${t.name === 'kite' ? '#00FF00' : '#FF0000'}" fill="transparent"/>`;
+    };
+    
+    // Print kites
+    output += '<path class="kites draw" d="';
+    for (let i = tiles.length - 1; i >= 0; i--) {
+      const t = tiles[i];
+      if (t.name === 'kite') {
+        printTile(t);
+      }
     }
+    output += `" stroke-width="2" stroke="#00FF00" fill="transparent"/>`;
+    // Print darts
+    output += '<path class="darts draw" d="';
+    for (i = tiles.length - 1; i >= 0; i--) {
+      const t = tiles[i];
+      if (t.name === 'dart') {
+        printTile(t);
+      }
+    }
+    output += `" stroke-width="2" stroke="#FF0000" fill="transparent"/>`;
   }
   
   return output;
@@ -819,6 +837,6 @@ function print(svgContent) {
 }
 
 onmessage = (e) => {
-  const plane = explore();
+  const plane = generate('star', null);
   postMessage({svg: print(drawPlane(plane, scale, {x: width / 2, y: height / 2})), done: true});
 };
